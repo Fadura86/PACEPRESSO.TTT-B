@@ -511,7 +511,7 @@ function renderResult() {
       ${edbar}
       ${tableHTML(d)}
       <div class="twocol">
-        <div class="sec"><h3>W′-Reserve über die Strecke</h3><div class="fig" id="fig"><svg role="img" aria-label="Verlauf der anaeroben Reserve je Fahrer über die Strecke"></svg></div><div class="legend" id="legend"></div></div>
+        <div class="sec"><h3>W′-Reserve und Höhenprofil</h3><div class="fig" id="fig"><svg role="img" aria-label="Verlauf der anaeroben Reserve je Fahrer über die Strecke, darunter das Höhenprofil"></svg></div><div class="legend" id="legend"></div><p class="hint cap">Unten: Höhenprofil relativ zum tiefsten Punkt, aus den Steigungswerten der API errechnet (Näherung, ein Wert etwa alle 400 m). Rot ab 4 %, orange ab 2 %, blau bergab ab 2 %.</p></div>
         <div class="sec"><h3>Warnungen</h3>${warnsHTML(d, p.evaluated || d.binding_constraint === 'evaluate_only')}</div>
       </div>
       <div class="twocol">
@@ -533,8 +533,9 @@ function drawChart(d) {
   lg.innerHTML = riders.map(x => `<span><span class="dot" style="--c:${esc(x.color || '#999')}"></span>${esc(x.name)} · min. ${fmt(x.fatigue?.min_reserve_percent, 0)} %</span>`).join('');
   const draw = () => {
     const W = svg.clientWidth, H = svg.clientHeight; if (!W || !H) return;
-    const L = 40, R = 10, T = 10, B = 46, pw = W - L - R, ph = H - T - B;
-    const maxKm = sm[sm.length - 1].dist_km || d.distance_km || 1;
+    const L = 40, R = 10, T = 10, EH = W < 520 ? 64 : 80, B = 24 + EH + 14, pw = W - L - R, ph = H - T - B;
+    const prof = (d.profile && d.profile.length > 1) ? d.profile : sm.map(q => [q.dist_km, q.gradient ?? 0]);
+    const maxKm = Math.max(sm[sm.length - 1].dist_km, prof[prof.length - 1][0]) || d.distance_km || 1;
     let lo = 100;
     for (const p of sm) for (const v of Object.values(p.riders || {})) lo = Math.min(lo, v);
     const y0 = Math.max(0, Math.min(50, Math.floor((lo - 5) / 10) * 10));
@@ -543,15 +544,23 @@ function drawChart(d) {
     const ink = css.getPropertyValue('--ink').trim(), mut = css.getPropertyValue('--mut').trim(), line = css.getPropertyValue('--line').trim();
     let s = '';
     const yst = (100 - y0) > 50 ? 25 : 10;
-    for (let v = y0; v <= 100; v += yst) s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${line}" stroke-width="1"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="12" fill="${mut}">${v} %</text>`;
+    for (let v = 100; v >= y0; v -= yst) s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${line}" stroke-width="1"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="12" fill="${mut}">${v} %</text>`;
     const stepKm = maxKm > 40 ? 10 : W < 520 ? 10 : 5;
     for (let k = 0; k <= maxKm + 0.01; k += stepKm) s += `<text x="${x(k)}" y="${H - 6}" text-anchor="middle" font-size="12" fill="${mut}">${k} km</text>`;
-    const gy = T + ph + 6, gh = 14;
-    sm.forEach((p, i) => {
-      const k0 = i ? (sm[i - 1].dist_km + p.dist_km) / 2 : 0, k1 = i < sm.length - 1 ? (p.dist_km + sm[i + 1].dist_km) / 2 : maxKm;
-      const g = p.gradient ?? 0, c = g >= 4 ? '#c23a2c' : g >= 2 ? '#e08a2a' : g <= -2 ? '#2f8fd1' : '#9aa8a3';
-      s += `<rect x="${x(k0)}" y="${gy}" width="${Math.max(1, x(k1) - x(k0))}" height="${gh}" fill="${c}" opacity=".85"><title>km ${fmt(p.dist_km, 1)}: ${fmt(g, 1)} %</title></rect>`;
-    });
+    /* Höhenprofil: aus den Steigungs-Stichproben aufsummiert (Näherung), Segmente nach Steigung gefärbt */
+    const et = T + ph + 14, eb = et + EH;
+    const hs = [0];
+    for (let i = 1; i < prof.length; i++) hs.push(hs[i - 1] + (prof[i][0] - prof[i - 1][0]) * 10 * (prof[i - 1][1] ?? 0));
+    const hmin = Math.min(...hs), hmax = Math.max(...hs), span = Math.max(20, hmax - hmin);
+    const ey = h => eb - 3 - ((h - hmin) / span) * (EH - 16);
+    for (let i = 1; i < prof.length; i++) {
+      const g = prof[i - 1][1] ?? 0, c = g >= 4 ? '#c23a2c' : g >= 2 ? '#e08a2a' : g <= -2 ? '#2f8fd1' : '#9aa8a3';
+      const x0 = x(prof[i - 1][0]).toFixed(1), x1 = (x(prof[i][0]) + 0.6).toFixed(1);
+      s += `<polygon points="${x0},${eb} ${x0},${ey(hs[i - 1]).toFixed(1)} ${x1},${ey(hs[i]).toFixed(1)} ${x1},${eb}" fill="${c}" opacity=".85"><title>km ${fmt(prof[i - 1][0], 1)}–${fmt(prof[i][0], 1)}: ${fmt(g, 1)} %</title></polygon>`;
+    }
+    s += `<polyline points="${prof.map((q, i) => `${x(q[0]).toFixed(1)},${ey(hs[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linejoin="round"/>`;
+    s += `<line x1="${L}" x2="${W - R}" y1="${eb}" y2="${eb}" stroke="${line}"/>`;
+    s += `<text x="${L - 6}" y="${ey(hmax) + 4}" text-anchor="end" font-size="12" fill="${mut}">${Math.round(hmax - hmin)} m</text><text x="${L - 6}" y="${eb}" text-anchor="end" font-size="12" fill="${mut}">0 m</text>`;
     for (const r of riders) {
       const id = String(r.zwift_id);
       const pts = sm.filter(p => p.riders && p.riders[id] != null).map(p => `${x(p.dist_km).toFixed(1)},${y(p.riders[id]).toFixed(1)}`).join(' ');
@@ -638,10 +647,10 @@ function pack(p, withTrace = true) {
     [f.survivors_count ?? null, f.predicted_drop_count || 0, f.predicted_skip_count || 0, f.best_rider_to_protect || ''],
     [fr.status || '', fr.timing_count || 0], img, d.image_width || 0, d.image_height || 0,
     rs.map(x => { const g = x.fatigue || {}; return [x.name, (x.color || '').replace('#', ''), x.cat || '', x.ftp, x.wkg, x.pull_duration, x.pull_power, x.pull_power_wkg, x.pull_ftp_percent, x.pull_speed, x.adjustment, x.avg_power, r1(x.if_percent), r1(x.if_limit_percent), x.wheel_powers || [], g.pulls_taken ?? null, Math.round(g.min_reserve_percent ?? 0), g.will_skip ? 1 : 0, g.skipped_turns || 0, r1(g.skip_distance_km), g.will_drop ? 1 : 0, r1(g.drop_distance_km), x.effort ?? 1, x.effort_outcome || 0]; }),
-    warn, tr];
+    warn, tr, sm.map(o => [Math.round(o.dist_km * 100) / 100, r1(o.gradient ?? 0)])];
 }
 function unpack(a) {
-  const [, at, team, ev, route, race_id, distance_km, elevation_m, laps, p2p, surf, bike, tf, ts, as, ap, ai, bc, int, el, ea, strat, ov, fat, fin, img, iw, ih, rr, warn, tr] = a;
+  const [, at, team, ev, route, race_id, distance_km, elevation_m, laps, p2p, surf, bike, tf, ts, as, ap, ai, bc, int, el, ea, strat, ov, fat, fin, img, iw, ih, rr, warn, tr, pf] = a;
   const riders = rr.map((x, i) => ({
     zwift_id: 'r' + i, order: i + 1, name: x[0], color: x[1] ? '#' + x[1] : '', cat: x[2], ftp: x[3], wkg: x[4], pull_duration: x[5], pull_power: x[6], pull_power_wkg: x[7],
     pull_ftp_percent: x[8], pull_speed: x[9], adjustment: x[10], avg_power: x[11], if_percent: x[12], if_limit_percent: x[13], wheel_powers: x[14], effort: x[22], effort_outcome: x[23] || null,
@@ -657,7 +666,7 @@ function unpack(a) {
       settings: { intensity: int, efficiency_label: el, efficiency_auto: !!ea, optimization_strategy: strat, optimizer_version: ov },
       fatigue: { survivors_count: fat[0], predicted_drop_count: fat[1], predicted_skip_count: fat[2], best_rider_to_protect: fat[3], trace: { samples } },
       finish_requirement: { status: fin[0], timing_count: fin[1] },
-      image_url: img ? IMG + img + '.png' : '', image_width: iw, image_height: ih,
+      image_url: img ? IMG + img + '.png' : '', image_width: iw, image_height: ih, profile: pf || null,
       riders, warnings: warn.map(([i, type, sev]) => ({ rider_name: i >= 0 ? riders[i]?.name : '', type, severity: sev ? 'warning' : 'info', message: '' }))
     }
   };

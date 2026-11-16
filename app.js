@@ -48,7 +48,7 @@ const ICON = {
 const DEF = () => ({
   v: 1, key: '', roster: ROSTER.map(r => ({ ...r })), sel: [], opt: {},
   race: { mode: 'race', race: 'next', route: '2836167073', laps: '1', km: '', bike: 'auto' },
-  set: { intensity: '0', efficiency: 'auto', finishers: '0', minPull: '30', maxPull: '180', step: '15', zero: false, strategy: 'variable', speed: '', holdSpeed: false, keepOrder: false, avgIf: '', maxIf: '', ftpSrc: 'zr', optimizer: 'v2', team: 'Pacepresso B', colour: '#0b4f43', layout: '' },
+  set: { intensity: '0', efficiency: 'auto', finishers: '0', minPull: '30', maxPull: '180', step: '15', zero: false, strategy: 'variable', speed: '', holdSpeed: false, keepOrder: false, avgIf: '', maxIf: '', ftp: 'team', optimizer: 'v2', team: 'Pacepresso B', colour: '#0b4f43', layout: '' },
   last: null
 });
 function load() {
@@ -107,7 +107,7 @@ function renderTop() {
 /* ---------- Kader ---------- */
 function riderHTML(r) {
   const i = S.sel.indexOf(r.id), on = i >= 0, o = S.opt[r.id] || {}, open = openDet.has(r.id);
-  const info = r.guest ? `Gast · FTP ${fmt(r.ftp)} W · ${fmt(r.weight, 1)} kg` : `#${r.id}${r.zftp ? ` · ${r.zftp} W · ${fmt(r.wkg, 2)} W/kg` : ''}`;
+  const info = r.guest ? `Gast · FTP ${fmt(r.ftp)} W · ${fmt(r.weight, 1)} kg` : `#${r.id}${num(o.ftp) != null ? ` · FTP ${fmt(num(o.ftp))} W (eigener Wert)` : S.set.ftp === 'team' && r.zftp ? ` · ${r.zftp} W · ${fmt(r.wkg, 2)} W/kg` : ' · FTP von ZwiftRacing'}`;
   const pins = ['pull', 'pmin', 'pmax', 'adj', 'amin', 'amax', 'ftp', 'weight', 'height', 'p5', 'cp', 'wkj', 'level'].some(k => o[k] !== undefined && o[k] !== '');
   const eff = o.effort || '1';
   const sel = (k, list, v) => `<select data-o="${k}">${list.map(([val, lab]) => `<option value="${val}"${String(v ?? '') === val ? ' selected' : ''}>${lab}</option>`).join('')}</select>`;
@@ -250,7 +250,7 @@ function bindSettings() {
       if (el.type === 'radio' && !el.checked) return;
       setPath(el.dataset.s, el.type === 'checkbox' ? el.checked : el.value);
       save(); syncRace();
-      if (el.dataset.s.startsWith('race.')) renderRoster();
+      if (el.dataset.s.startsWith('race.') || el.dataset.s === 'set.ftp') renderRoster();
     });
   });
 }
@@ -292,7 +292,7 @@ function riderObj(r) {
   const cat = o.cat || r.cat; if (cat) x.cat = cat;
   if (r.guest) { x.ftp = num(r.ftp); x.weight = num(r.weight); x.height = num(r.height); }
   else {
-    if (S.set.ftpSrc === 'team' && r.zftp && r.wkg) { x.ftp = r.zftp; x.weight = Math.round(r.zftp / r.wkg * 10) / 10; }
+    if (S.set.ftp === 'team' && r.zftp && r.wkg) { x.ftp = r.zftp; x.weight = Math.round(r.zftp / r.wkg * 10) / 10; }
     for (const k of ['ftp', 'weight', 'height']) { const v = num(o[k]); if (v != null) x[k] = v; }
   }
   const m = { p5: 'power_300_watts', cp: 'cp', wkj: 'wprime_kj' };

@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <header class="top">
@@ -131,9 +131,9 @@
           <label>IF max. je Fahrer (%)<input type="number" min="50" max="130" step="0.5" placeholder="aus Intensität" data-s="set.maxIf"></label>
         </div>
         <div class="row2">
-          <label>FTP-Quelle<select data-s="set.ftpSrc">
-            <option value="zr">ZwiftRacing (automatisch, mit Leistungsprofil)</option>
-            <option value="team">zFTP und Gewicht von der Teamseite</option>
+          <label>FTP-Quelle<select data-s="set.ftp">
+            <option value="team">zFTP und Gewicht von der Teamseite (wie angezeigt)</option>
+            <option value="zr">ZwiftRacing (automatisch)</option>
           </select></label>
           <label>Optimierer<select data-s="set.optimizer"><option value="v2">V2 (schnell, Standard)</option><option value="v1">V1</option></select></label>
         </div>
@@ -180,7 +180,7 @@
   </form>
 </dialog>
 
-<script src="data.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="data.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

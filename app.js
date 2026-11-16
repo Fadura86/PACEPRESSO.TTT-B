@@ -511,7 +511,7 @@ function renderResult() {
       ${edbar}
       ${tableHTML(d)}
       <div class="twocol">
-        <div class="sec"><h3>W′-Reserve und Höhenprofil</h3><div class="fig" id="fig"><svg role="img" aria-label="Verlauf der anaeroben Reserve je Fahrer über die Strecke, darunter das Höhenprofil"></svg></div><div class="legend" id="legend"></div><p class="hint cap">Unten: Höhenprofil relativ zum tiefsten Punkt, aus den Steigungswerten der API errechnet (Näherung, ein Wert etwa alle 400 m). Rot ab 4 %, orange ab 2 %, blau bergab ab 2 %.</p></div>
+        <div class="sec"><h3>W′-Reserve und Höhenprofil</h3><div class="fig" id="fig"><svg role="img" aria-label="Verlauf der anaeroben Reserve je Fahrer über die Strecke, darunter das Höhenprofil"></svg></div><div class="legend" id="legend"></div><p class="hint cap">Unten: Höhenprofil relativ zum tiefsten Punkt, aus den Steigungswerten der API errechnet (Näherung, ein Wert etwa alle 400 m). Je röter, desto steiler bergauf, je blauer, desto steiler bergab.</p></div>
         <div class="sec"><h3>Warnungen</h3>${warnsHTML(d, p.evaluated || d.binding_constraint === 'evaluate_only')}</div>
       </div>
       <div class="twocol">
@@ -550,17 +550,21 @@ function drawChart(d) {
     /* Höhenprofil: aus den Steigungs-Stichproben aufsummiert (Näherung), Segmente nach Steigung gefärbt */
     const et = T + ph + 14, eb = et + EH;
     const hs = [0];
-    for (let i = 1; i < prof.length; i++) hs.push(hs[i - 1] + (prof[i][0] - prof[i - 1][0]) * 10 * (prof[i - 1][1] ?? 0));
+    /* Zu grobe Stichproben (alte Plan-Links) ergeben aufsummiert falsche Höhen: dann nur ein flacher Steigungsstreifen */
+    const sparse = maxKm / (prof.length - 1) > 0.6;
+    for (let i = 1; i < prof.length; i++) hs.push(sparse ? 0 : hs[i - 1] + (prof[i][0] - prof[i - 1][0]) * 10 * (prof[i - 1][1] ?? 0));
+    const mix = (a, b, t) => `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * t)).join(',')})`;
+    const gcol = g => g >= 0 ? mix([170, 180, 176], [200, 48, 36], Math.min(1, g / 5)) : mix([170, 180, 176], [36, 120, 200], Math.min(1, -g / 5));
     const hmin = Math.min(...hs), hmax = Math.max(...hs), span = Math.max(20, hmax - hmin);
-    const ey = h => eb - 3 - ((h - hmin) / span) * (EH - 16);
+    const ey = h => sparse ? eb - 16 : eb - 3 - ((h - hmin) / span) * (EH - 16);
     for (let i = 1; i < prof.length; i++) {
-      const g = prof[i - 1][1] ?? 0, c = g >= 4 ? '#c23a2c' : g >= 2 ? '#e08a2a' : g <= -2 ? '#2f8fd1' : '#9aa8a3';
+      const g = prof[i - 1][1] ?? 0, c = gcol(g);
       const x0 = x(prof[i - 1][0]).toFixed(1), x1 = (x(prof[i][0]) + 0.6).toFixed(1);
-      s += `<polygon points="${x0},${eb} ${x0},${ey(hs[i - 1]).toFixed(1)} ${x1},${ey(hs[i]).toFixed(1)} ${x1},${eb}" fill="${c}" opacity=".85"><title>km ${fmt(prof[i - 1][0], 1)}–${fmt(prof[i][0], 1)}: ${fmt(g, 1)} %</title></polygon>`;
+      s += `<polygon points="${x0},${eb} ${x0},${ey(hs[i - 1]).toFixed(1)} ${x1},${ey(hs[i]).toFixed(1)} ${x1},${eb}" fill="${c}"><title>km ${fmt(prof[i - 1][0], 1)}–${fmt(prof[i][0], 1)}: ${fmt(g, 1)} %</title></polygon>`;
     }
-    s += `<polyline points="${prof.map((q, i) => `${x(q[0]).toFixed(1)},${ey(hs[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linejoin="round"/>`;
+    if (!sparse) s += `<polyline points="${prof.map((q, i) => `${x(q[0]).toFixed(1)},${ey(hs[i]).toFixed(1)}`).join(' ')}" fill="none" stroke="${ink}" stroke-width="1.5" stroke-linejoin="round"/>`;
     s += `<line x1="${L}" x2="${W - R}" y1="${eb}" y2="${eb}" stroke="${line}"/>`;
-    s += `<text x="${L - 6}" y="${ey(hmax) + 4}" text-anchor="end" font-size="12" fill="${mut}">${Math.round(hmax - hmin)} m</text><text x="${L - 6}" y="${eb}" text-anchor="end" font-size="12" fill="${mut}">0 m</text>`;
+    if (!sparse) s += `<text x="${L - 6}" y="${ey(hmax) + 4}" text-anchor="end" font-size="12" fill="${mut}">${Math.round(hmax - hmin)} m</text><text x="${L - 6}" y="${eb}" text-anchor="end" font-size="12" fill="${mut}">0 m</text>`;
     for (const r of riders) {
       const id = String(r.zwift_id);
       const pts = sm.filter(p => p.riders && p.riders[id] != null).map(p => `${x(p.dist_km).toFixed(1)},${y(p.riders[id]).toFixed(1)}`).join(' ');
@@ -634,7 +638,7 @@ function pack(p, withTrace = true) {
   const d = p.data, s = d.settings || {}, f = d.fatigue || {}, fr = d.finish_requirement || {};
   const rs = d.riders.slice().sort((a, b) => a.order - b.order);
   const img = ((d.image_url || '').match(/\/p-([0-9a-f]+)\.png$/) || [])[1] || '';
-  const sm = withTrace ? (f.trace?.samples || []) : [], N = 24;
+  const sm = withTrace ? (f.trace?.samples || []) : [], N = 60;
   const tr = sm.length ? Array.from({ length: Math.min(N, sm.length) }, (_, i) => sm[Math.round(i * (sm.length - 1) / (Math.min(N, sm.length) - 1 || 1))])
     .map(o => [r1(o.dist_km), Math.round(o.gradient ?? 0), ...rs.map(x => Math.round(o.riders?.[String(x.zwift_id)] ?? -1))]) : [];
   const warn = (d.warnings || []).filter(w => !(w.type === 'CONSTRAINT_AT_LIMIT' && d.binding_constraint === 'evaluate_only') && w.type !== 'EFFORT_NOT_MET' && w.type !== 'EFFORT_COST')

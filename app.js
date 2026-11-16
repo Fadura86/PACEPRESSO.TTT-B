@@ -463,7 +463,7 @@ function warnsHTML(d, evaluated) {
   const order = { warning: 0, info: 2 };
   return `<ul class="warns">${w.slice().sort((a, b) => (order[a.severity] ?? 1) - (order[b.severity] ?? 1)).map(x => {
     const t = WARN[x.type] || (String(x.type).startsWith('FINISH_REQUIREMENT') ? 'Finisher-Vorgabe' : x.type);
-    return `<li class="${esc(x.severity || '')}"><b>${x.rider_name ? esc(x.rider_name) + ': ' : ''}${esc(t)}</b><small>${esc(x.message || '')}</small></li>`;
+    return `<li class="${esc(x.severity || '')}"><b>${x.rider_name ? esc(x.rider_name) + ': ' : ''}${esc(t)}</b>${x.message ? `<small>${esc(x.message)}</small>` : ''}</li>`;
   }).join('')}</ul>`;
 }
 function renderResult() {
@@ -584,7 +584,7 @@ function bindResult() {
     else if (t === 'img') makeImage();
     else if (t === 'text') copy(planText(p), 'Text kopiert. Einfach in den Team-Chat einfügen.');
     else if (t === 'json') copy(JSON.stringify({ request: p.req, data: p.data }, null, 2), 'JSON kopiert.');
-    else if (t === 'link') copy(planLink(p), 'Plan-Link kopiert. Jeder sieht damit genau diesen Plan, ohne Key.');
+    else if (t === 'link') copy(shortLink(p), () => lastShort ? `Kurzlink kopiert: ${lastShort.replace('https://', '')} – zeigt genau diesen Plan, ohne Key.` : 'Plan-Link kopiert (Kurzlink-Dienst gerade nicht erreichbar, daher die lange Version).');
     else if (t === 'share') sharePlan(p);
   });
   box.addEventListener('input', e => {
@@ -614,38 +614,84 @@ function planText(p) {
 }
 const b64u = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
 const unb64u = s => { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/')); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
-function slim(p) {
-  const d = JSON.parse(JSON.stringify(p.data));
-  const tr = d.fatigue?.trace;
-  if (tr?.samples?.length) {
-    const s = tr.samples, st = Math.ceil(s.length / 45);
-    tr.samples = s.filter((_, i) => i % st === 0 || i === s.length - 1).map(o => ({ dist_km: Math.round(o.dist_km * 100) / 100, gradient: o.gradient, riders: Object.fromEntries(Object.entries(o.riders || {}).map(([k, v]) => [k, Math.round(v)])) }));
-  }
-  if (d.fatigue) delete d.fatigue.note;
-  if (d.constraint_detail) { delete d.constraint_detail.guard; delete d.constraint_detail.effort; }
-  if (d.settings) delete d.settings.intensity_description;
-  d.riders.forEach(x => { ['wheel_ftp_percents', 'speed_index_source', 'cp_source', 'wprime_source', 'wprime_confidence'].forEach(k => delete x[k]); });
-  return { at: p.at, team: p.req?.team_name || '', evaluated: !!p.evaluated, data: d };
+/* Plan-Link: kompakte Liste statt voller API-Antwort, dann deflate + base64url.
+   Ohne Rechner-Link (der allein wäre länger als der ganze Plan); das Bild wird über seinen Hash verlinkt. */
+const IMG = 'https://zwiftgopher.com/TTT/download/api/p-';
+const r1 = v => v == null ? null : Math.round(v * 10) / 10;
+function pack(p) {
+  const d = p.data, s = d.settings || {}, f = d.fatigue || {}, fr = d.finish_requirement || {};
+  const rs = d.riders.slice().sort((a, b) => a.order - b.order);
+  const img = ((d.image_url || '').match(/\/p-([0-9a-f]+)\.png$/) || [])[1] || '';
+  const sm = f.trace?.samples || [], N = 24;
+  const tr = sm.length ? Array.from({ length: Math.min(N, sm.length) }, (_, i) => sm[Math.round(i * (sm.length - 1) / (Math.min(N, sm.length) - 1 || 1))])
+    .map(o => [r1(o.dist_km), Math.round(o.gradient ?? 0), ...rs.map(x => Math.round(o.riders?.[String(x.zwift_id)] ?? -1))]) : [];
+  const warn = (d.warnings || []).filter(w => !(w.type === 'CONSTRAINT_AT_LIMIT' && d.binding_constraint === 'evaluate_only') && w.type !== 'EFFORT_NOT_MET' && w.type !== 'EFFORT_COST')
+    .map(w => [Math.max(-1, rs.findIndex(x => x.name === w.rider_name)), w.type, w.severity === 'warning' ? 1 : 0]);
+  return [3, Math.round(p.at / 60000), p.req?.team_name || p.team || '', p.evaluated ? 1 : 0,
+    d.route, d.race_id || '', r1(d.distance_km), r1(d.elevation_m), d.laps || 0, d.point_to_point ? 1 : 0,
+    (d.surfaces || []).map(x => [x.surface, r1(x.km)]), d.bike ? [d.bike.default, (d.bike.swaps || []).map(w => [r1(w.at_km), w.to])] : 0,
+    d.estimated_time_formatted, r1(num(d.target_speed)), r1(d.estimated_avg_speed), d.team_avg_power, r1(d.team_avg_if),
+    d.binding_constraint || '', s.intensity ?? '', s.efficiency_label || '', s.efficiency_auto ? 1 : 0, s.optimization_strategy || '', s.optimizer_version || '',
+    [f.survivors_count ?? null, f.predicted_drop_count || 0, f.predicted_skip_count || 0, f.best_rider_to_protect || ''],
+    [fr.status || '', fr.timing_count || 0], img, d.image_width || 0, d.image_height || 0,
+    rs.map(x => { const g = x.fatigue || {}; return [x.name, (x.color || '').replace('#', ''), x.cat || '', x.ftp, x.wkg, x.pull_duration, x.pull_power, x.pull_power_wkg, x.pull_ftp_percent, x.pull_speed, x.adjustment, x.avg_power, r1(x.if_percent), r1(x.if_limit_percent), x.wheel_powers || [], g.pulls_taken ?? null, Math.round(g.min_reserve_percent ?? 0), g.will_skip ? 1 : 0, g.skipped_turns || 0, r1(g.skip_distance_km), g.will_drop ? 1 : 0, r1(g.drop_distance_km), x.effort ?? 1, x.effort_outcome || 0]; }),
+    warn, tr];
+}
+function unpack(a) {
+  const [, at, team, ev, route, race_id, distance_km, elevation_m, laps, p2p, surf, bike, tf, ts, as, ap, ai, bc, int, el, ea, strat, ov, fat, fin, img, iw, ih, rr, warn, tr] = a;
+  const riders = rr.map((x, i) => ({
+    zwift_id: 'r' + i, order: i + 1, name: x[0], color: x[1] ? '#' + x[1] : '', cat: x[2], ftp: x[3], wkg: x[4], pull_duration: x[5], pull_power: x[6], pull_power_wkg: x[7],
+    pull_ftp_percent: x[8], pull_speed: x[9], adjustment: x[10], avg_power: x[11], if_percent: x[12], if_limit_percent: x[13], wheel_powers: x[14], effort: x[22], effort_outcome: x[23] || null,
+    fatigue: { pulls_taken: x[15], min_reserve_percent: x[16], will_skip: !!x[17], skipped_turns: x[18], skip_distance_km: x[19], will_drop: !!x[20], drop_distance_km: x[21] }
+  }));
+  const samples = (tr || []).map(t => ({ dist_km: t[0], gradient: t[1], riders: Object.fromEntries(riders.map((r, i) => [r.zwift_id, t[2 + i]]).filter(([, v]) => v >= 0)) }));
+  return {
+    at: at * 60000, team, evaluated: !!ev,
+    data: {
+      route, race_id, distance_km, elevation_m, laps, point_to_point: !!p2p, surfaces: surf.map(([surface, km]) => ({ surface, km })),
+      bike: bike ? { default: bike[0], swaps: bike[1].map(([at_km, to]) => ({ at_km, to })) } : null,
+      estimated_time_formatted: tf, target_speed: ts, estimated_avg_speed: as, team_avg_power: ap, team_avg_if: ai, binding_constraint: bc,
+      settings: { intensity: int, efficiency_label: el, efficiency_auto: !!ea, optimization_strategy: strat, optimizer_version: ov },
+      fatigue: { survivors_count: fat[0], predicted_drop_count: fat[1], predicted_skip_count: fat[2], best_rider_to_protect: fat[3], trace: { samples } },
+      finish_requirement: { status: fin[0], timing_count: fin[1] },
+      image_url: img ? IMG + img + '.png' : '', image_width: iw, image_height: ih,
+      riders, warnings: warn.map(([i, type, sev]) => ({ rider_name: i >= 0 ? riders[i]?.name : '', type, severity: sev ? 'warning' : 'info', message: '' }))
+    }
+  };
+}
+async function deflate(str) {
+  if (!('CompressionStream' in window)) return 'j' + b64u(new TextEncoder().encode(str));
+  const buf = await new Response(new Blob([str]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer();
+  return 'c' + b64u(new Uint8Array(buf));
 }
 async function planLink(p) {
-  const json = JSON.stringify(slim(p));
-  let tok;
-  if ('CompressionStream' in window) {
-    const buf = await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer();
-    tok = 'z' + b64u(new Uint8Array(buf));
-  } else tok = 'j' + b64u(new TextEncoder().encode(json));
-  return location.origin + location.pathname + '#plan=' + tok;
+  return location.origin + location.pathname + '#p=' + await deflate(JSON.stringify(pack(p)));
+}
+/* Kurzlink über is.gd (CORS offen, behält das #-Fragment). Fällt der Dienst aus, bleibt der lange Link. */
+let lastShort = '';
+async function shortLink(p) {
+  if (p.short) { lastShort = p.short; return p.short; }
+  const long = await planLink(p);
+  lastShort = '';
+  try {
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('https://is.gd/create.php?format=json&url=' + encodeURIComponent(long), { signal: ctl.signal });
+    clearTimeout(to);
+    const j = await r.json();
+    if (j && /^https:\/\/is\.gd\/\w+$/.test(j.shorturl || '')) { p.short = lastShort = j.shorturl; if (p === S.last) save(); return j.shorturl; }
+  } catch (e) { /* Dienst nicht erreichbar */ }
+  return long;
 }
 async function readPlan(tok) {
   const bytes = unb64u(tok.slice(1));
-  let txt;
-  if (tok[0] === 'z') txt = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
-  else txt = new TextDecoder().decode(bytes);
-  return JSON.parse(txt);
+  const txt = tok[0] === 'j' ? new TextDecoder().decode(bytes)
+    : await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+  const o = JSON.parse(txt);
+  return Array.isArray(o) ? unpack(o) : o;   /* alte, lange Links (#plan=z…) bleiben lesbar */
 }
 async function sharePlan(p) {
   try {
-    const url = shared ? location.href : await planLink(p);
+    const url = shared ? location.href : await shortLink(p);
     await navigator.share({ title: 'TTT-Plan', text: planText(p).split('\nIm Rechner:')[0], url });
   } catch (e) { if (e.name !== 'AbortError') say('Teilen nicht möglich: ' + e.message, 'err'); }
 }
@@ -654,24 +700,24 @@ async function copy(t, ok) {
   try {
     if (typeof t !== 'string' && window.ClipboardItem && navigator.clipboard?.write) {
       await navigator.clipboard.write([new ClipboardItem({ 'text/plain': Promise.resolve(t).then(x => new Blob([x], { type: 'text/plain' })) })]);
-      return say(ok, 'ok');
+      return say(typeof ok === 'function' ? ok() : ok, 'ok');
     }
     const txt = await t;
-    await navigator.clipboard.writeText(txt); say(ok, 'ok');
+    await navigator.clipboard.writeText(txt); say(typeof ok === 'function' ? ok() : ok, 'ok');
   } catch (e) {
     const txt = await t;
     const ta = document.createElement('textarea');
     ta.value = txt; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
     document.body.append(ta); ta.select();
     let done = false; try { done = document.execCommand('copy'); } catch (_) { /* nicht unterstützt */ }
-    ta.remove(); say(done ? ok : 'Kopieren nicht möglich.', done ? 'ok' : 'err');
+    ta.remove(); say(done ? (typeof ok === 'function' ? ok() : ok) : 'Kopieren nicht möglich.', done ? 'ok' : 'err');
   }
 }
 function showShared() {
   const b = $('#shared');
   $('#planner').before($('#result'));
   b.hidden = false;
-  b.innerHTML = `<div class="wrap"><span><b>Geteilter Plan</b> vom ${new Date(shared.at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}${shared.team ? ' · ' + esc(shared.team) : ''}. So hat ihn der Captain gerechnet.</span><button class="btn" type="button" id="leaveShared">Eigenen Plan rechnen</button></div>`;
+  b.innerHTML = `<div class="wrap"><span><b>Geteilter Plan vom ${new Date(shared.at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</b></span><button class="btn" type="button" id="leaveShared">Eigenen Plan rechnen</button></div>`;
   $('#leaveShared').addEventListener('click', () => { shared = null; b.hidden = true; $('#planner').after($('#result')); history.replaceState(null, '', location.pathname + location.search); renderResult(); $('#planner').scrollIntoView(); });
 }
 
@@ -714,7 +760,7 @@ async function init() {
   bindRoster(); bindResult(); bindKey();
   $('#optBtn').addEventListener('click', optimize);
   setBusy(false);
-  const pt = hp.get('plan');
+  const pt = hp.get('p') || hp.get('plan');
   if (pt) {
     try { shared = await readPlan(pt); showShared(); }
     catch (e) { shared = null; say('Der geteilte Plan-Link ist unvollständig oder beschädigt.', 'err'); }

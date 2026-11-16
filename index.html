@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pacepresso TTT-Planer</title>
+<meta name="theme-color" content="#0b4f43">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b4f43'/%3E%3Cpath d='M8 9l8 6 8-6v5l-8 6-8-6z' fill='%23f2c230'/%3E%3Cpath d='M8 17l8 6 8-6v4l-8 6-8-6z' fill='%23f2c230' opacity='.75'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-in">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><path d="M6 8l14 10 14-10v8L20 26 6 16z" fill="#f2c230"/><path d="M6 20l14 10 14-10v6L20 36 6 26z" fill="#f2c230" opacity=".7"/></svg>
+      <div>
+        <h1>Pacepresso <span>TTT-Planer</span></h1>
+        <p id="nextLine" class="sub">Zugplan für das Mannschaftszeitfahren</p>
+      </div>
+    </div>
+    <button id="keyBtn" class="chip" type="button">API-Key</button>
+  </div>
+</header>
+
+<div id="shared" class="shared" hidden></div>
+
+<main class="wrap grid" id="planner">
+  <section class="card" aria-labelledby="h-team">
+    <div class="card-h">
+      <h2 id="h-team">Aufstellung</h2>
+      <span id="selCount" class="count">0 gewählt</span>
+    </div>
+    <p class="hint" id="selHint">Tippe die Fahrer an, die fahren. Mit den Pfeilen legst du die Startreihenfolge fest.</p>
+    <ol id="roster" class="roster"></ol>
+    <details class="add">
+      <summary>Fahrer oder Gast hinzufügen</summary>
+      <form id="addZwift" class="addf">
+        <p class="lbl">Teammitglied per Zwift-ID</p>
+        <div class="row3">
+          <label>Zwift-ID<input id="aId" inputmode="numeric" pattern="[0-9]+" required></label>
+          <label>Name<input id="aName" required maxlength="60"></label>
+          <button class="btn" type="submit">Hinzufügen</button>
+        </div>
+      </form>
+      <form id="addGuest" class="addf">
+        <p class="lbl">Gast ohne Zwift-ID</p>
+        <div class="row5">
+          <label>Name<input id="gName" required maxlength="60"></label>
+          <label>FTP (W)<input id="gFtp" type="number" min="50" max="2000" required></label>
+          <label>Gewicht (kg)<input id="gKg" type="number" min="35" max="200" step="0.1" required></label>
+          <label>Größe (cm)<input id="gCm" type="number" min="100" max="230" required></label>
+          <button class="btn" type="submit">Hinzufügen</button>
+        </div>
+      </form>
+      <button id="resetRoster" class="link" type="button">Kader auf Teamseite zurücksetzen</button>
+    </details>
+  </section>
+
+  <div class="side">
+    <section class="card" aria-labelledby="h-race">
+      <h2 id="h-race">Rennen</h2>
+      <div class="seg" role="radiogroup" aria-label="Rennen oder Strecke">
+        <label><input type="radio" name="rmode" value="race" data-s="race.mode"><span>Geplantes Rennen</span></label>
+        <label><input type="radio" name="rmode" value="route" data-s="race.mode"><span>Freie Strecke</span></label>
+      </div>
+      <div id="raceBox">
+        <label>Rennen<select id="raceSel" data-s="race.race"></select></label>
+      </div>
+      <div id="routeBox" hidden>
+        <label>Strecke<select id="routeSel" data-s="race.route"></select></label>
+        <div class="row2">
+          <label>Runden<input id="lapsIn" type="number" min="1" step="1" data-s="race.laps"></label>
+          <label>oder Distanz (km)<input id="kmIn" type="number" min="1" max="200" step="0.1" placeholder="ganze Strecke" data-s="race.km"></label>
+        </div>
+        <p class="hint" id="routeInfo"></p>
+      </div>
+      <label>Rad<select data-s="race.bike">
+        <option value="auto">Automatisch (TT-Rad, Kletterrad an langen Anstiegen)</option>
+        <option value="tt">Immer Zeitfahrrad</option>
+        <option value="climb">Immer Kletterrad</option>
+      </select></label>
+    </section>
+
+    <section class="card" aria-labelledby="h-set">
+      <h2 id="h-set">Taktik</h2>
+      <label class="rng">Intensität <output id="intOut"></output>
+        <input id="intIn" type="range" min="-3" max="3" step="1" data-s="set.intensity">
+      </label>
+      <p class="hint" id="intDesc"></p>
+      <div class="row2">
+        <label>Team-Effizienz<select data-s="set.efficiency">
+          <option value="auto">Automatisch</option>
+          <option value="-2">Schwach</option>
+          <option value="-1">Durchschnittlich</option>
+          <option value="0">Gut (typisches Team)</option>
+          <option value="1">Sehr gut</option>
+          <option value="2">Elite</option>
+        </select></label>
+        <label>Finisher<select data-s="set.finishers">
+          <option value="0">Automatisch (Rennregel)</option>
+          <option value="2">2 Fahrer</option><option value="3">3 Fahrer</option>
+          <option value="4">4 Fahrer (ZRL)</option><option value="5">5 Fahrer</option>
+          <option value="6">6 Fahrer</option><option value="7">7 Fahrer</option><option value="8">8 Fahrer</option>
+        </select></label>
+      </div>
+      <div class="row3">
+        <label>Zug min. (s)<input type="number" min="10" max="120" step="5" data-s="set.minPull"></label>
+        <label>Zug max. (s)<input type="number" min="30" max="600" step="5" data-s="set.maxPull"></label>
+        <label>Raster<select data-s="set.step"><option value="15">15 s</option><option value="10">10 s</option></select></label>
+      </div>
+      <label class="chk"><input type="checkbox" data-s="set.zero"><span>Null-Züge erlauben (Fahrer darf nur im Windschatten fahren)</span></label>
+      <div class="seg" role="radiogroup" aria-label="Strategie">
+        <label><input type="radio" name="strat" value="variable" data-s="set.strategy"><span>Variabel: jeder im eigenen Tempo</span></label>
+        <label><input type="radio" name="strat" value="fixed" data-s="set.strategy"><span>Gleichmäßig: alle gleich schnell</span></label>
+      </div>
+      <div class="row2">
+        <label>Zieltempo (km/h)<input type="number" min="15" max="70" step="0.1" placeholder="automatisch" data-s="set.speed"></label>
+        <div class="stackchk">
+          <label class="chk"><input type="checkbox" data-s="set.holdSpeed"><span>Tempo halten</span></label>
+          <label class="chk"><input type="checkbox" data-s="set.keepOrder"><span>Reihenfolge beibehalten</span></label>
+        </div>
+      </div>
+      <details class="more-set">
+        <summary>Erweitert</summary>
+        <div class="row2">
+          <label>Team-IF Ø (%)<input type="number" min="50" max="130" step="0.5" placeholder="aus Intensität" data-s="set.avgIf"></label>
+          <label>IF max. je Fahrer (%)<input type="number" min="50" max="130" step="0.5" placeholder="aus Intensität" data-s="set.maxIf"></label>
+        </div>
+        <div class="row2">
+          <label>FTP-Quelle<select data-s="set.ftpSrc">
+            <option value="zr">ZwiftRacing (automatisch, mit Leistungsprofil)</option>
+            <option value="team">zFTP und Gewicht von der Teamseite</option>
+          </select></label>
+          <label>Optimierer<select data-s="set.optimizer"><option value="v2">V2 (schnell, Standard)</option><option value="v1">V1</option></select></label>
+        </div>
+        <div class="row2">
+          <label>Teamname<input maxlength="60" data-s="set.team"></label>
+          <label>Teamfarbe<input type="color" data-s="set.colour"></label>
+        </div>
+        <label>Bild-Layout<select data-s="set.layout">
+          <option value="">Standard</option><option value="phone">Handy</option><option value="raceday">Renntag</option>
+          <option value="captain">Captain</option><option value="wheels">Hinterrad-Leistungen</option><option value="pacing">Pacing</option>
+          <option value="profiles">Fahrerprofile</option><option value="kit">Trikotfarben</option><option value="narrow">Schmal</option>
+          <option value="header">Nur Kopf</option><option value="basic">Einfach</option><option value="all">Alles</option>
+        </select></label>
+      </details>
+    </section>
+
+    <div class="go">
+      <button id="optBtn" class="btn primary" type="button">Optimieren</button>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+</main>
+
+<section id="result" class="wrap result" aria-label="Rennplan"></section>
+
+<footer class="wrap foot">
+  <p>Berechnung: <a href="https://zwiftgopher.com/TTT" target="_blank" rel="noopener">ZwiftGopher TTT API</a> (Optimierer des TTT-Rechners von Dave Edmonds). Fahrerdaten: ZwiftRacing und ZwiftPower. Kader nach Teamseite, Stand 16.11.2026.</p>
+  <p>Budget pro Key: 40 Einheiten pro Minute, 600 pro Stunde. Optimieren kostet 10, Bewerten und Bild je 1.</p>
+</footer>
+
+<dialog id="keyDlg" class="dlg">
+  <form method="dialog" id="keyForm">
+    <h2>API-Key</h2>
+    <p class="hint">Der Key bleibt nur in diesem Browser gespeichert. Für das Team: Team-Link kopieren und im Team-Chat teilen. Wer ihn öffnet, ist sofort eingerichtet.</p>
+    <label>Key<input id="keyIn" type="password" autocomplete="off" spellcheck="false" placeholder="sk_live_…"></label>
+    <label class="chk"><input type="checkbox" id="keyShow"><span>Key anzeigen</span></label>
+    <div class="dlg-b">
+      <button class="btn primary" value="save" type="submit">Speichern</button>
+      <button class="btn" id="teamLink" type="button">Team-Link kopieren</button>
+      <button class="btn ghost" id="keyDel" type="button">Key entfernen</button>
+      <button class="btn ghost" value="cancel" type="submit" formnovalidate>Schließen</button>
+    </div>
+    <p id="keyMsg" class="status"></p>
+  </form>
+</dialog>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
